@@ -436,10 +436,10 @@ mod test {
         assert!(int_param_value.definition().is_none());
 
         let float_param_value = container_values
-            .create_numerical_param_value(&float_param_def, "3.14")
+            .create_numerical_param_value(&float_param_def, "3.45")
             .unwrap();
-        assert_eq!(float_param_value.value().as_deref(), Some("3.14"));
-        assert_eq!(float_param_value.value_float(), Some(3.14));
+        assert_eq!(float_param_value.value().as_deref(), Some("3.45"));
+        assert_eq!(float_param_value.value_float(), Some(3.45));
         float_param_value.set_value("2.71").unwrap();
         assert_eq!(float_param_value.value_float(), Some(2.71));
         float_param_value.set_index(Some(2)).unwrap();

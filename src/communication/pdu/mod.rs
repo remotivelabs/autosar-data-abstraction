@@ -1832,7 +1832,7 @@ mod test {
         let dp_alt = multiplexed_ipdu.add_dynamic_part(&dynamic_ipdu, 0, true).unwrap();
         assert_eq!(dp_alt.ipdu().unwrap(), dynamic_ipdu);
         assert_eq!(dp_alt.selector_field_code().unwrap(), 0);
-        assert_eq!(dp_alt.is_initial_dynamic_part().unwrap(), true);
+        assert!(dp_alt.is_initial_dynamic_part().unwrap());
         assert_eq!(dp_alt.multiplexed_ipdu().unwrap(), multiplexed_ipdu);
         assert_eq!(multiplexed_ipdu.dynamic_part_alternatives().count(), 1);
 

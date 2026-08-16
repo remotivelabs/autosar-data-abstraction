@@ -973,10 +973,9 @@ impl SwValue {
                 // The VTF element can contain either a Vf or a Vt element
                 if let Some(vf) = element.get_sub_element(ElementName::Vf) {
                     SwValue::VtfNumber(vf.character_data()?.parse_float()?)
-                } else if let Some(vt) = element.get_sub_element(ElementName::Vt) {
-                    SwValue::VtfText(vt.character_data()?.string_value()?)
                 } else {
-                    return None;
+                    let vt = element.get_sub_element(ElementName::Vt)?;
+                    SwValue::VtfText(vt.character_data()?.string_value()?)
                 }
             }
             _ => return None,
@@ -1293,10 +1292,9 @@ impl RuleArgument {
                 // The VTF element can contain either a Vf or a Vt element
                 if let Some(vf) = element.get_sub_element(ElementName::Vf) {
                     RuleArgument::VtfNumber(vf.character_data()?.parse_float()?)
-                } else if let Some(vt) = element.get_sub_element(ElementName::Vt) {
-                    RuleArgument::VtfText(vt.character_data()?.string_value()?)
                 } else {
-                    return None;
+                    let vt = element.get_sub_element(ElementName::Vt)?;
+                    RuleArgument::VtfText(vt.character_data()?.string_value()?)
                 }
             }
             _ => return None,

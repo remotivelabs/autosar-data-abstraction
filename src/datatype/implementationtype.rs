@@ -203,13 +203,11 @@ pub trait AbstractImplementationDataType: IdentifiableAbstractionElement {
                     .and_then(|elem| elem.get_reference_target().ok())
                 {
                     DataPointerTarget::BaseType(base_type.try_into().ok()?)
-                } else if let Some(impl_data_type) = sw_pointer_target_props
-                    .get_sub_element(ElementName::ImplementationDataTypeRef)
-                    .and_then(|elem| elem.get_reference_target().ok())
-                {
-                    DataPointerTarget::ImplementationDataType(impl_data_type.try_into().ok()?)
                 } else {
-                    return None;
+                    let impl_data_type = sw_pointer_target_props
+                        .get_sub_element(ElementName::ImplementationDataTypeRef)
+                        .and_then(|elem| elem.get_reference_target().ok())?;
+                    DataPointerTarget::ImplementationDataType(impl_data_type.try_into().ok()?)
                 };
                 Some(ImplementationDataTypeSettings::DataReference {
                     name: self.name()?,
