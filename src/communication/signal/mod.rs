@@ -124,6 +124,25 @@ impl ISignal {
         Ok(())
     }
 
+    /// get the compu method of this signal's network representation
+    ///
+    /// A signal may state on its own `NETWORK-REPRESENTATION-PROPS` how its raw values are to be
+    /// read on the wire. That overrides the physical properties of the system signal behind it,
+    /// which is what a `DATA-TYPE-POLICY` of `OVERRIDE` says, so a caller that wants the effective
+    /// conversion should prefer this one over [`SystemSignal::compu_method`].
+    #[must_use]
+    pub fn compu_method(&self) -> Option<CompuMethod> {
+        self.element()
+            .get_sub_element(ElementName::NetworkRepresentationProps)?
+            .get_sub_element(ElementName::SwDataDefPropsVariants)?
+            .get_sub_element(ElementName::SwDataDefPropsConditional)?
+            .get_sub_element(ElementName::CompuMethodRef)?
+            .get_reference_target()
+            .ok()?
+            .try_into()
+            .ok()
+    }
+
     /// get the data type of this signal
     #[must_use]
     pub fn datatype(&self) -> Option<SwBaseType> {
