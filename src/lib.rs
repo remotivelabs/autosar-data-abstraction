@@ -271,9 +271,13 @@ impl AutosarModelAbstraction {
     }
 
     /// create an `AutosarModelAbstraction` from a file on disk
-    pub fn from_file<P: AsRef<Path>>(file_name: P) -> Result<Self, AutosarAbstractionError> {
+    ///
+    /// `strict` is passed on to [`AutosarModel::load_file`]: a strict load refuses a file that
+    /// breaks a schema rule, a lenient one records the problem as a warning and reads on, which
+    /// is what a reader of files written by other tools needs. `from_buffer` takes the same flag.
+    pub fn from_file<P: AsRef<Path>>(file_name: P, strict: bool) -> Result<Self, AutosarAbstractionError> {
         let model = AutosarModel::new();
-        model.load_file(file_name, true)?;
+        model.load_file(file_name, strict)?;
         Ok(Self(model))
     }
 
@@ -509,7 +513,7 @@ mod test {
         model1.write().unwrap();
 
         // create a new model from the file
-        let model2 = AutosarModelAbstraction::from_file(filename).unwrap();
+        let model2 = AutosarModelAbstraction::from_file(filename, true).unwrap();
         let root = model2.root_element();
         assert_eq!(root.element_name(), ElementName::Autosar);
     }
