@@ -174,6 +174,27 @@ impl ClientServerOperation {
             .filter_map(|elem| ArgumentDataPrototype::try_from(elem).ok())
     }
 
+    /// Check whether the operation is fire-and-forget: a call that expects no response
+    #[must_use]
+    pub fn fire_and_forget(&self) -> Option<bool> {
+        self.element()
+            .get_sub_element(ElementName::FireAndForget)?
+            .character_data()?
+            .parse_bool()
+    }
+
+    /// Set whether the operation is fire-and-forget
+    pub fn set_fire_and_forget(&self, fire_and_forget: Option<bool>) -> Result<(), AutosarAbstractionError> {
+        if let Some(fire_and_forget) = fire_and_forget {
+            self.element()
+                .get_or_create_sub_element(ElementName::FireAndForget)?
+                .set_character_data(fire_and_forget)?;
+        } else {
+            let _ = self.element().remove_sub_element_kind(ElementName::FireAndForget);
+        }
+        Ok(())
+    }
+
     /// add a reference to possible error to the operation
     pub fn add_possible_error(&self, error: &ApplicationError) -> Result<(), AutosarAbstractionError> {
         if self.element().named_parent()? != error.element().named_parent()? {
@@ -362,6 +383,12 @@ mod test {
         assert_eq!(argument.data_type().unwrap().name().unwrap(), "ImplementationValue");
         assert_eq!(argument.direction().unwrap(), ArgumentDirection::In);
         assert_eq!(operation.arguments().count(), 1);
+
+        assert_eq!(operation.fire_and_forget(), None);
+        operation.set_fire_and_forget(Some(true)).unwrap();
+        assert_eq!(operation.fire_and_forget(), Some(true));
+        operation.set_fire_and_forget(None).unwrap();
+        assert_eq!(operation.fire_and_forget(), None);
 
         client_server_interface.set_is_service(Some(true)).unwrap();
         assert!(client_server_interface.is_service().unwrap());

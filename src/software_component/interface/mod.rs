@@ -320,6 +320,21 @@ impl TriggerInterface {
         Ok(Self(trigger_interface))
     }
 
+    /// Create a new `Trigger` in the interface
+    pub fn create_trigger(&self, name: &str) -> Result<Trigger, AutosarAbstractionError> {
+        let triggers = self.element().get_or_create_sub_element(ElementName::Triggers)?;
+        Trigger::new(name, &triggers)
+    }
+
+    /// iterate over all triggers of the interface
+    pub fn triggers(&self) -> impl Iterator<Item = Trigger> + Send + use<> {
+        self.element()
+            .get_sub_element(ElementName::Triggers)
+            .into_iter()
+            .flat_map(|triggers| triggers.sub_elements())
+            .filter_map(|elem| Trigger::try_from(elem).ok())
+    }
+
     /// remove this `TriggerInterface` from the model
     pub fn remove(self, deep: bool) -> Result<(), AutosarAbstractionError> {
         let ref_parents = get_reference_parents(self.element())?;
@@ -436,6 +451,25 @@ impl PortInterface {
             PortInterface::NvDataInterface(interface) => interface.remove(deep),
             PortInterface::TriggerInterface(interface) => interface.remove(deep),
         }
+    }
+}
+
+//##################################################################
+
+//##################################################################
+
+/// A `Trigger` of a `TriggerInterface`
+///
+/// Use [`TriggerInterface::create_trigger`] to create a new trigger
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Trigger(Element);
+abstraction_element!(Trigger, Trigger);
+impl IdentifiableAbstractionElement for Trigger {}
+
+impl Trigger {
+    fn new(name: &str, parent: &Element) -> Result<Self, AutosarAbstractionError> {
+        let trigger = parent.create_named_sub_element(ElementName::Trigger, name)?;
+        Ok(Self(trigger))
     }
 }
 
