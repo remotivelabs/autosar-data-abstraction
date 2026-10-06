@@ -299,9 +299,9 @@ impl CompuMethod {
                 let compu_scale = CompuScale::try_from(compu_scale_elem).ok()?;
                 let content = compu_scale.content()?;
                 if let CompuScaleContent::RationalCoeffs { numerator, denominator } = content {
-                    let offset = numerator[0];
-                    let factor = numerator[1];
-                    let divisor = denominator[0];
+                    let offset = numerator.first().copied()?;
+                    let factor = numerator.get(1).copied().unwrap_or(0.0);
+                    let divisor = denominator.first().copied().unwrap_or(1.0);
                     let lower_limit = compu_scale.lower_limit();
                     let upper_limit = compu_scale.upper_limit();
 
@@ -332,9 +332,9 @@ impl CompuMethod {
                     let upper_limit = compu_scale.upper_limit()?;
                     let content = compu_scale.content()?;
                     if let CompuScaleContent::RationalCoeffs { numerator, denominator } = content {
-                        let offset = numerator[0];
-                        let factor = numerator[1];
-                        let divisor = denominator[0];
+                        let offset = numerator.first().copied()?;
+                        let factor = numerator.get(1).copied().unwrap_or(0.0);
+                        let divisor = denominator.first().copied().unwrap_or(1.0);
 
                         scale_linear_content.push(CompuMethodScaleLinearContent {
                             direction,
@@ -430,9 +430,9 @@ impl CompuMethod {
                     let upper_limit = compu_scale.upper_limit()?;
                     let content = compu_scale.content()?;
                     if let CompuScaleContent::RationalCoeffs { numerator, denominator } = content {
-                        let offset = numerator[0];
-                        let factor = numerator[1];
-                        let divisor = denominator[0];
+                        let offset = numerator.first().copied()?;
+                        let factor = numerator.get(1).copied().unwrap_or(0.0);
+                        let divisor = denominator.first().copied().unwrap_or(1.0);
 
                         scale_linear_content.push(CompuMethodScaleLinearContent {
                             direction,
@@ -828,11 +828,13 @@ impl CompuScale {
                     numerator.push(value);
                 }
             }
+            // COMPU-DENOMINATOR is optional; without one, the numerator is divided by 1.
             let mut denominator = vec![];
-            let compu_denominator = compu_rational_coeffs.get_sub_element(ElementName::CompuDenominator)?;
-            for v in compu_denominator.sub_elements() {
-                if let Some(value) = v.character_data().and_then(|cdata| cdata.parse_float()) {
-                    denominator.push(value);
+            if let Some(compu_denominator) = compu_rational_coeffs.get_sub_element(ElementName::CompuDenominator) {
+                for v in compu_denominator.sub_elements() {
+                    if let Some(value) = v.character_data().and_then(|cdata| cdata.parse_float()) {
+                        denominator.push(value);
+                    }
                 }
             }
             return Some(CompuScaleContent::RationalCoeffs { numerator, denominator });
@@ -1314,5 +1316,170 @@ mod test {
             "SCALE_RATIONAL_AND_TEXTTABLE"
         );
         assert_eq!(CompuMethodCategory::TabNoInterpretation.to_string(), "TAB_NOINTP");
+    }
+
+    /// A compu method of `content` whose first linear scale holds the given coefficients instead
+    /// of the ones `content` gives it.
+    fn with_coefficients(
+        package: &ArPackage,
+        content: CompuMethodContent,
+        numerator: Vec<f64>,
+        denominator: Vec<f64>,
+    ) -> CompuMethod {
+        let compu_method = CompuMethod::new("compu_method", package, content).unwrap();
+        let compu_scale = compu_method
+            .int_to_phys_compu_scales()
+            .find(|scale| matches!(scale.content(), Some(CompuScaleContent::RationalCoeffs { .. })))
+            .unwrap();
+        compu_scale
+            .set_content(CompuScaleContent::RationalCoeffs { numerator, denominator })
+            .unwrap();
+        compu_method
+    }
+
+    fn linear_compu_method(package: &ArPackage, numerator: Vec<f64>, denominator: Vec<f64>) -> CompuMethod {
+        let content = CompuMethodContent::Linear(CompuMethodLinearContent {
+            direction: CompuScaleDirection::IntToPhys,
+            offset: 5.0,
+            factor: 1.0,
+            divisor: 2.0,
+            lower_limit: Some(0.0),
+            upper_limit: Some(100.0),
+        });
+        with_coefficients(package, content, numerator, denominator)
+    }
+
+    fn scale(offset: f64, factor: f64, divisor: f64) -> CompuMethodScaleLinearContent {
+        CompuMethodScaleLinearContent {
+            direction: CompuScaleDirection::IntToPhys,
+            offset,
+            factor,
+            divisor,
+            lower_limit: 0.0,
+            upper_limit: 100.0,
+        }
+    }
+
+    fn text(value: f64) -> CompuMethodTextTableContent {
+        CompuMethodTextTableContent {
+            text: "invalid".to_string(),
+            value,
+        }
+    }
+
+    #[test]
+    fn linear_compu_method_with_a_constant_numerator() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/Package").unwrap();
+
+        let compu_method = linear_compu_method(&package, vec![5.0], vec![2.0]);
+
+        assert_eq!(
+            compu_method.content(),
+            Some(CompuMethodContent::Linear(CompuMethodLinearContent {
+                direction: CompuScaleDirection::IntToPhys,
+                offset: 5.0,
+                factor: 0.0,
+                divisor: 2.0,
+                lower_limit: Some(0.0),
+                upper_limit: Some(100.0),
+            }))
+        );
+    }
+
+    #[test]
+    fn linear_compu_method_without_a_denominator_divides_by_one() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/Package").unwrap();
+
+        let compu_method = linear_compu_method(&package, vec![5.0, 1.0], vec![]);
+
+        assert_eq!(
+            compu_method.content(),
+            Some(CompuMethodContent::Linear(CompuMethodLinearContent {
+                direction: CompuScaleDirection::IntToPhys,
+                offset: 5.0,
+                factor: 1.0,
+                divisor: 1.0,
+                lower_limit: Some(0.0),
+                upper_limit: Some(100.0),
+            }))
+        );
+
+        compu_method
+            .int_to_phys_compu_scales()
+            .next()
+            .unwrap()
+            .element()
+            .get_sub_element(ElementName::CompuRationalCoeffs)
+            .unwrap()
+            .remove_sub_element_kind(ElementName::CompuDenominator)
+            .ok();
+        let Some(CompuMethodContent::Linear(linear)) = compu_method.content() else {
+            panic!("a linear compu method without a COMPU-DENOMINATOR still reads");
+        };
+        assert_eq!(linear.divisor, 1.0);
+    }
+
+    #[test]
+    fn scale_linear_compu_method_with_a_constant_numerator() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/Package").unwrap();
+
+        let content = CompuMethodContent::ScaleLinear(vec![scale(5.0, 1.0, 2.0)]);
+        let compu_method = with_coefficients(&package, content, vec![5.0], vec![2.0]);
+
+        assert_eq!(
+            compu_method.content(),
+            Some(CompuMethodContent::ScaleLinear(vec![scale(5.0, 0.0, 2.0)]))
+        );
+    }
+
+    #[test]
+    fn scale_linear_compu_method_without_a_denominator_divides_by_one() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/Package").unwrap();
+
+        let content = CompuMethodContent::ScaleLinear(vec![scale(5.0, 1.0, 2.0)]);
+        let compu_method = with_coefficients(&package, content, vec![5.0, 1.0], vec![]);
+
+        assert_eq!(
+            compu_method.content(),
+            Some(CompuMethodContent::ScaleLinear(vec![scale(5.0, 1.0, 1.0)]))
+        );
+    }
+
+    #[test]
+    fn scale_linear_and_texttable_compu_method_with_a_constant_numerator() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/Package").unwrap();
+
+        let content = CompuMethodContent::ScaleLinearAndTextTable(vec![scale(5.0, 1.0, 2.0)], vec![text(255.0)]);
+        let compu_method = with_coefficients(&package, content, vec![5.0], vec![2.0]);
+
+        assert_eq!(
+            compu_method.content(),
+            Some(CompuMethodContent::ScaleLinearAndTextTable(
+                vec![scale(5.0, 0.0, 2.0)],
+                vec![text(255.0)]
+            ))
+        );
+    }
+
+    #[test]
+    fn scale_linear_and_texttable_compu_method_without_a_denominator_divides_by_one() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/Package").unwrap();
+
+        let content = CompuMethodContent::ScaleLinearAndTextTable(vec![scale(5.0, 1.0, 2.0)], vec![text(255.0)]);
+        let compu_method = with_coefficients(&package, content, vec![5.0, 1.0], vec![]);
+
+        assert_eq!(
+            compu_method.content(),
+            Some(CompuMethodContent::ScaleLinearAndTextTable(
+                vec![scale(5.0, 1.0, 1.0)],
+                vec![text(255.0)]
+            ))
+        );
     }
 }
