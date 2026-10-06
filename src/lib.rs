@@ -275,24 +275,53 @@ impl AutosarModelAbstraction {
     /// `strict` is passed on to [`AutosarModel::load_file`]: a strict load refuses a file that
     /// breaks a schema rule, a lenient one records the problem as a warning and reads on, which
     /// is what a reader of files written by other tools needs. `from_buffer` takes the same flag.
+    /// A lenient load's warnings are dropped here; `from_file_with_warnings` hands them over.
     pub fn from_file<P: AsRef<Path>>(file_name: P, strict: bool) -> Result<Self, AutosarAbstractionError> {
+        let (model, _warnings) = Self::from_file_with_warnings(file_name, strict)?;
+        Ok(model)
+    }
+
+    /// create an `AutosarModelAbstraction` from a file on disk, together with the warnings of the load
+    ///
+    /// A warning is a problem that a lenient load tolerated and read past, such as a duplicate
+    /// attribute, an element from another schema version or a value that fails its pattern.
+    /// A strict load refuses the file instead, so it returns no warnings.
+    pub fn from_file_with_warnings<P: AsRef<Path>>(
+        file_name: P,
+        strict: bool,
+    ) -> Result<(Self, Vec<AutosarDataError>), AutosarAbstractionError> {
         let model = AutosarModel::new();
-        model.load_file(file_name, strict)?;
-        Ok(Self(model))
+        let (_file, warnings) = model.load_file(file_name, strict)?;
+        Ok((Self(model), warnings))
     }
 
     /// Create an `AutosarModelAbstraction` from a buffer
     ///
     /// Since all autosar data is always associated with a file, a file name must be provided
     /// but no file is created on disk unless you call `write()`.
+    /// A lenient load's warnings are dropped here; `from_buffer_with_warnings` hands them over.
     pub fn from_buffer<P: AsRef<Path>>(
         buffer: &[u8],
         file_name: P,
         strict: bool,
     ) -> Result<Self, AutosarAbstractionError> {
+        let (model, _warnings) = Self::from_buffer_with_warnings(buffer, file_name, strict)?;
+        Ok(model)
+    }
+
+    /// Create an `AutosarModelAbstraction` from a buffer, together with the warnings of the load
+    ///
+    /// A warning is a problem that a lenient load tolerated and read past, such as a duplicate
+    /// attribute, an element from another schema version or a value that fails its pattern.
+    /// A strict load refuses the buffer instead, so it returns no warnings.
+    pub fn from_buffer_with_warnings<P: AsRef<Path>>(
+        buffer: &[u8],
+        file_name: P,
+        strict: bool,
+    ) -> Result<(Self, Vec<AutosarDataError>), AutosarAbstractionError> {
         let model = AutosarModel::new();
-        model.load_buffer(buffer, file_name, strict)?;
-        Ok(Self(model))
+        let (_file, warnings) = model.load_buffer(buffer, file_name, strict)?;
+        Ok((Self(model), warnings))
     }
 
     /// Get the underlying `AutosarModel` from the abstraction model
@@ -488,7 +517,7 @@ pub(crate) fn get_reference_parents(element: &Element) -> Result<Vec<(Element, E
 #[cfg(test)]
 mod test {
     use super::*;
-    use autosar_data::AutosarModel;
+    use autosar_data::{ArxmlParserError, AutosarModel};
 
     #[test]
     fn create_model() {
@@ -590,6 +619,38 @@ mod test {
         let model = AutosarModelAbstraction::from_buffer(buffer, "buffer.arxml", true).unwrap();
         let package = model.get_or_create_package("/MyPackage").unwrap();
         assert_eq!(package.name().unwrap(), "MyPackage");
+    }
+
+    #[test]
+    fn from_buffer_with_warnings() {
+        // the AR-PACKAGE has no SHORT-NAME, which a lenient load tolerates and a strict load refuses
+        let buffer = br#"
+        <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+        <AUTOSAR xmlns="http://autosar.org/schema/r4.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://autosar.org/schema/r4.0 AUTOSAR_00046.xsd">
+            <AR-PACKAGES>
+                <AR-PACKAGE>
+                    <ELEMENTS>
+                        <ECU-INSTANCE>
+                            <SHORT-NAME>Ecu</SHORT-NAME>
+                        </ECU-INSTANCE>
+                    </ELEMENTS>
+                </AR-PACKAGE>
+            </AR-PACKAGES>
+        </AUTOSAR>
+        "#;
+
+        let (_model, warnings) =
+            AutosarModelAbstraction::from_buffer_with_warnings(buffer, "buffer.arxml", false).unwrap();
+        assert!(matches!(
+            warnings.first(),
+            Some(AutosarDataError::ParserError {
+                source: ArxmlParserError::RequiredSubelementMissing { .. },
+                ..
+            })
+        ));
+
+        assert!(AutosarModelAbstraction::from_buffer_with_warnings(buffer, "buffer.arxml", true).is_err());
+        assert!(AutosarModelAbstraction::from_buffer(buffer, "buffer.arxml", false).is_ok());
     }
 
     #[test]
