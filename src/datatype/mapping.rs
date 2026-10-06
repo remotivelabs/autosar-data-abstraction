@@ -41,6 +41,21 @@ impl DataTypeMappingSet {
             .flat_map(|maps| maps.sub_elements())
             .filter_map(|elem| DataTypeMap::try_from(elem).ok())
     }
+
+    /// Get the `ImplementationDataType` that an `ApplicationDataType` is mapped to in this set
+    #[must_use]
+    pub fn implementation_data_type<T: Into<ApplicationDataType> + Clone>(
+        &self,
+        application_data_type: &T,
+    ) -> Option<ImplementationDataType> {
+        let application_data_type = application_data_type.clone().into();
+        self.data_type_maps()
+            .find(|map| {
+                map.application_data_type()
+                    .is_some_and(|mapped| mapped.element() == application_data_type.element())
+            })?
+            .implementation_data_type()
+    }
 }
 
 //#########################################################
@@ -144,5 +159,20 @@ mod tests {
         assert_eq!(data_type_map.application_data_type().unwrap(), app_data_type);
 
         assert_eq!(mapping_set.data_type_maps().count(), 1);
+        assert_eq!(
+            mapping_set.implementation_data_type(&app_data_type),
+            Some(impl_data_type)
+        );
+        let unmapped: ApplicationDataType = ApplicationPrimitiveDataType::new(
+            "Unmapped",
+            &package,
+            ApplicationPrimitiveCategory::Value,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .into();
+        assert_eq!(mapping_set.implementation_data_type(&unmapped), None);
     }
 }

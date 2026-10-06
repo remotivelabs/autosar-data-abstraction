@@ -5,8 +5,8 @@ use crate::{
 use autosar_data::ElementName;
 use communication::SystemSignal;
 use software_component::{
-    AbstractSwComponentType, ComponentPrototype, PortInterface, PortPrototype, RootSwCompositionPrototype,
-    SwComponentPrototype, VariableDataPrototype,
+    AbstractSwComponentType, ClientServerOperation, ComponentPrototype, PortInterface, PortPrototype,
+    RootSwCompositionPrototype, SwComponentPrototype, Trigger, VariableDataPrototype,
 };
 
 //##################################################################
@@ -305,6 +305,107 @@ impl SenderReceiverToSignalMapping {
 
 //#########################################################
 
+/// A `ClientServerToSignalMapping` maps a client/server operation to the system signals that carry its call and its return
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ClientServerToSignalMapping(Element);
+abstraction_element!(ClientServerToSignalMapping, ClientServerToSignalMapping);
+
+impl ClientServerToSignalMapping {
+    /// Get the operation that is mapped
+    #[must_use]
+    pub fn operation(&self) -> Option<ClientServerOperation> {
+        let element = self
+            .element()
+            .get_sub_element(ElementName::ClientServerOperationIref)
+            .and_then(|iref| iref.get_sub_element(ElementName::TargetOperationRef))
+            .and_then(|r| r.get_reference_target().ok())?;
+        ClientServerOperation::try_from(element).ok()
+    }
+
+    /// Get the system signal that carries the call, if there is one
+    #[must_use]
+    pub fn call_signal(&self) -> Option<SystemSignal> {
+        self.referenced_signal(ElementName::CallSignalRef)
+    }
+
+    /// Get the system signal that carries the return, if there is one
+    #[must_use]
+    pub fn return_signal(&self) -> Option<SystemSignal> {
+        self.referenced_signal(ElementName::ReturnSignalRef)
+    }
+
+    fn referenced_signal(&self, reference: ElementName) -> Option<SystemSignal> {
+        let element = self.element().get_sub_element(reference)?.get_reference_target().ok()?;
+        SystemSignal::try_from(element).ok()
+    }
+}
+
+//#########################################################
+
+/// A `TriggerToSignalMapping` maps a trigger to the system signal that carries it
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TriggerToSignalMapping(Element);
+abstraction_element!(TriggerToSignalMapping, TriggerToSignalMapping);
+
+impl TriggerToSignalMapping {
+    /// Get the system signal that is the target of this mapping
+    #[must_use]
+    pub fn system_signal(&self) -> Option<SystemSignal> {
+        let element = self
+            .element()
+            .get_sub_element(ElementName::SystemSignalRef)?
+            .get_reference_target()
+            .ok()?;
+        SystemSignal::try_from(element).ok()
+    }
+
+    /// Get the trigger that is mapped
+    #[must_use]
+    pub fn trigger(&self) -> Option<Trigger> {
+        let element = self
+            .element()
+            .get_sub_element(ElementName::TriggerIref)
+            .and_then(|iref| iref.get_sub_element(ElementName::TargetTriggerRef))
+            .and_then(|r| r.get_reference_target().ok())?;
+        Trigger::try_from(element).ok()
+    }
+}
+
+//#########################################################
+
+/// A mapping of a data element, an operation or a trigger to a system signal
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SignalMapping {
+    /// a data element of a sender/receiver interface
+    SenderReceiver(SenderReceiverToSignalMapping),
+    /// an operation of a client/server interface, through its call signal or its return signal
+    ClientServer(ClientServerToSignalMapping),
+    /// a trigger of a trigger interface
+    Trigger(TriggerToSignalMapping),
+}
+
+impl TryFrom<Element> for SignalMapping {
+    type Error = AutosarAbstractionError;
+
+    fn try_from(element: Element) -> Result<Self, Self::Error> {
+        match element.element_name() {
+            ElementName::SenderReceiverToSignalMapping => {
+                Ok(Self::SenderReceiver(SenderReceiverToSignalMapping::try_from(element)?))
+            }
+            ElementName::ClientServerToSignalMapping => {
+                Ok(Self::ClientServer(ClientServerToSignalMapping::try_from(element)?))
+            }
+            ElementName::TriggerToSignalMapping => Ok(Self::Trigger(TriggerToSignalMapping::try_from(element)?)),
+            _ => Err(AutosarAbstractionError::ConversionError {
+                element,
+                dest: "SignalMapping".to_string(),
+            }),
+        }
+    }
+}
+
+//#########################################################
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -368,5 +469,83 @@ mod test {
         mapping
             .map_sender_receiver_to_signal(&sys_signal, &data_element, &sr_port, &[], None)
             .unwrap();
+    }
+
+    #[test]
+    fn signal_mappings() {
+        let model = AutosarModelAbstraction::create("filename", autosar_data::AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/package").unwrap();
+        let system = package
+            .create_system("test_system", SystemCategory::EcuExtract)
+            .unwrap();
+        let mapping = system.get_or_create_mapping("test_mapping").unwrap();
+        let data_mappings = mapping
+            .element()
+            .get_or_create_sub_element(ElementName::DataMappings)
+            .unwrap();
+
+        // an operation, carried by a call signal and a return signal
+        let call_signal = package.create_system_signal("call").unwrap();
+        let return_signal = package.create_system_signal("return").unwrap();
+        let interface = package.create_client_server_interface("interface").unwrap();
+        let operation = interface.create_operation("operation").unwrap();
+        let cs_mapping = data_mappings
+            .create_sub_element(ElementName::ClientServerToSignalMapping)
+            .unwrap();
+        cs_mapping
+            .create_sub_element(ElementName::CallSignalRef)
+            .unwrap()
+            .set_reference_target(call_signal.element())
+            .unwrap();
+        cs_mapping
+            .create_sub_element(ElementName::ClientServerOperationIref)
+            .unwrap()
+            .create_sub_element(ElementName::TargetOperationRef)
+            .unwrap()
+            .set_reference_target(operation.element())
+            .unwrap();
+        cs_mapping
+            .create_sub_element(ElementName::ReturnSignalRef)
+            .unwrap()
+            .set_reference_target(return_signal.element())
+            .unwrap();
+
+        // a trigger, carried by a signal
+        let trigger_signal = package.create_system_signal("trigger").unwrap();
+        let trigger_interface = package.create_trigger_interface("triggers").unwrap();
+        let trigger = trigger_interface.create_trigger("trigger").unwrap();
+        assert_eq!(trigger_interface.triggers().collect::<Vec<_>>(), vec![trigger.clone()]);
+        let trigger_mapping = data_mappings
+            .create_sub_element(ElementName::TriggerToSignalMapping)
+            .unwrap();
+        trigger_mapping
+            .create_sub_element(ElementName::SystemSignalRef)
+            .unwrap()
+            .set_reference_target(trigger_signal.element())
+            .unwrap();
+        trigger_mapping
+            .create_sub_element(ElementName::TriggerIref)
+            .unwrap()
+            .create_sub_element(ElementName::TargetTriggerRef)
+            .unwrap()
+            .set_reference_target(trigger.element())
+            .unwrap();
+
+        let call_mappings = call_signal.mappings();
+        let [SignalMapping::ClientServer(cs)] = call_mappings.as_slice() else {
+            panic!("the call signal is mapped once, to the operation");
+        };
+        assert_eq!(cs.operation(), Some(operation));
+        assert_eq!(cs.call_signal(), Some(call_signal.clone()));
+        assert_eq!(cs.return_signal(), Some(return_signal.clone()));
+        assert_eq!(return_signal.mappings(), vec![SignalMapping::ClientServer(cs.clone())]);
+
+        let trigger_mappings = trigger_signal.mappings();
+        let [SignalMapping::Trigger(trigger_to_signal)] = trigger_mappings.as_slice() else {
+            panic!("the trigger signal is mapped once, to the trigger");
+        };
+        assert_eq!(trigger_to_signal.trigger(), Some(trigger));
+        assert_eq!(trigger_to_signal.system_signal(), Some(trigger_signal.clone()));
+        assert!(package.create_system_signal("unmapped").unwrap().mappings().is_empty());
     }
 }

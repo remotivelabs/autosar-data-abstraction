@@ -8,7 +8,7 @@ use crate::{
     communication::ISignalToIPduMapping, make_unique_name,
 };
 use crate::{
-    IdentifiableAbstractionElement, SenderReceiverToSignalMapping, get_reference_parents, is_used,
+    IdentifiableAbstractionElement, SenderReceiverToSignalMapping, SignalMapping, get_reference_parents, is_used,
     is_used_system_element,
 };
 use autosar_data::{AutosarDataError, Element, ElementName, EnumItem, WeakElement};
@@ -365,6 +365,18 @@ impl SystemSignal {
         let elem_syssignal = package_elements.create_named_sub_element(ElementName::SystemSignal, name)?;
 
         Ok(Self(elem_syssignal))
+    }
+
+    /// Get the mappings of data elements, operations and triggers to this signal
+    #[must_use]
+    pub fn mappings(&self) -> Vec<SignalMapping> {
+        let Ok(parents) = get_reference_parents(self.element()) else {
+            return Vec::new();
+        };
+        parents
+            .into_iter()
+            .filter_map(|(_named_parent, parent)| SignalMapping::try_from(parent).ok())
+            .collect()
     }
 
     /// remove this `SystemSignal` from the model
