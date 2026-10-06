@@ -301,6 +301,17 @@ impl SenderReceiverToSignalMapping {
             .and_then(|r| r.get_reference_target().ok())?;
         VariableDataPrototype::try_from(element).ok()
     }
+
+    /// Get the port through which the data element is mapped: the context of the instance reference
+    #[must_use]
+    pub fn context_port(&self) -> Option<PortPrototype> {
+        let element = self
+            .element()
+            .get_sub_element(ElementName::DataElementIref)
+            .and_then(|iref| iref.get_sub_element(ElementName::ContextPortRef))
+            .and_then(|r| r.get_reference_target().ok())?;
+        PortPrototype::try_from(element).ok()
+    }
 }
 
 //#########################################################
