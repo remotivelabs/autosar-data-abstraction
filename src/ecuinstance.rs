@@ -1,6 +1,6 @@
 use crate::communication::{
     CanCommunicationController, CanTpEcu, CommunicationController, EthernetCommunicationController,
-    FlexrayCommunicationController, FlexrayTpEcu, ISignalIPduGroup, LinMaster, LinSlave, NmEcu,
+    FlexrayCommunicationController, FlexrayTpEcu, Gateway, ISignalIPduGroup, LinMaster, LinSlave, NmEcu,
 };
 use crate::{
     AbstractionElement, ArPackage, AutosarAbstractionError, IdentifiableAbstractionElement, abstraction_element,
@@ -51,6 +51,11 @@ impl EcuInstance {
                 ElementName::FlexrayTpEcu => {
                     if let Ok(frtp_ecu) = FlexrayTpEcu::try_from(parent) {
                         frtp_ecu.remove(deep)?;
+                    };
+                }
+                ElementName::Gateway => {
+                    if let Ok(gateway) = Gateway::try_from(parent) {
+                        gateway.remove(deep)?;
                     };
                 }
                 _ => {}

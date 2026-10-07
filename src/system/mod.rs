@@ -1,11 +1,12 @@
 use crate::communication::{
     CanCluster, CanFrame, CanTpConfig, Cluster, CommunicationDirection, ContainerIPdu, ContainerIPduHeaderType,
     DcmIPdu, DiagPduType, DoIpTpConfig, EthernetCluster, EventGroupControlType, FlexrayArTpConfig, FlexrayCluster,
-    FlexrayClusterSettings, FlexrayFrame, FlexrayTpConfig, Frame, GeneralPurposeIPdu, GeneralPurposeIPduCategory,
-    GeneralPurposePdu, GeneralPurposePduCategory, ISignal, ISignalGroup, ISignalIPdu, ISignalIPduGroup, LinCluster,
-    LinEventTriggeredFrame, LinSporadicFrame, LinUnconditionalFrame, MultiplexedIPdu, NPdu, NmConfig, NmPdu, Pdu,
-    RxAcceptContainedIPdu, SecureCommunicationProps, SecuredIPdu, ServiceInstanceCollectionSet, SoAdRoutingGroup,
-    SocketConnectionIpduIdentifierSet, SomeipTpConfig, SystemSignal, SystemSignalGroup, UserDefinedPdu,
+    FlexrayClusterSettings, FlexrayFrame, FlexrayTpConfig, Frame, Gateway, GeneralPurposeIPdu,
+    GeneralPurposeIPduCategory, GeneralPurposePdu, GeneralPurposePduCategory, ISignal, ISignalGroup, ISignalIPdu,
+    ISignalIPduGroup, LinCluster, LinEventTriggeredFrame, LinSporadicFrame, LinUnconditionalFrame, MultiplexedIPdu,
+    NPdu, NmConfig, NmPdu, Pdu, RxAcceptContainedIPdu, SecureCommunicationProps, SecuredIPdu,
+    ServiceInstanceCollectionSet, SoAdRoutingGroup, SocketConnectionIpduIdentifierSet, SomeipTpConfig, SystemSignal,
+    SystemSignalGroup, UserDefinedPdu,
 };
 use crate::datatype::SwBaseType;
 use crate::software_component::{CompositionSwComponentType, RootSwCompositionPrototype};
@@ -121,6 +122,10 @@ impl System {
 
             if let Some(nm_config) = self.nm_config() {
                 nm_config.remove(deep)?;
+            }
+
+            for gateway in self.gateways() {
+                gateway.remove(deep)?;
             }
 
             for ecu_instance in self.ecu_instances() {
@@ -246,6 +251,59 @@ impl System {
                 ferc.get_sub_element(ElementName::FibexElementRef)
                     .and_then(|fer| fer.get_reference_target().ok())
                     .and_then(|elem| EcuInstance::try_from(elem).ok())
+            })
+    }
+
+    /// create a [`Gateway`] for an `EcuInstance` that is connected to this System
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use autosar_data::*;
+    /// # use autosar_data_abstraction::*;
+    /// # fn main() -> Result<(), AutosarAbstractionError> {
+    /// # let model = AutosarModelAbstraction::create("filename", AutosarVersion::Autosar_00048);
+    /// # let package = model.get_or_create_package("/pkg1")?;
+    /// let system = package.create_system("System", SystemCategory::SystemExtract)?;
+    /// let ecu_instance = system.create_ecu_instance("ecu_name", &package)?;
+    /// let gateway = system.create_gateway("gateway_name", &package, &ecu_instance)?;
+    /// assert_eq!(gateway.ecu(), Some(ecu_instance));
+    /// # Ok(())}
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// - [`AutosarAbstractionError::InvalidParameter`] The `EcuInstance` is not connected to this System
+    /// - [`AutosarAbstractionError::ModelError`] An error occurred in the Autosar model while trying to create the GATEWAY
+    pub fn create_gateway(
+        &self,
+        name: &str,
+        package: &ArPackage,
+        ecu_instance: &EcuInstance,
+    ) -> Result<Gateway, AutosarAbstractionError> {
+        if !self.ecu_instances().any(|ecu| ecu == *ecu_instance) {
+            return Err(AutosarAbstractionError::InvalidParameter(
+                "The EcuInstance of a Gateway must be connected to the System".to_string(),
+            ));
+        }
+        let gateway = Gateway::new(name, package, ecu_instance)?;
+        self.create_fibex_element_ref_unchecked(gateway.element())?;
+
+        Ok(gateway)
+    }
+
+    /// get an iterator over all GATEWAYs in this SYSTEM
+    ///
+    /// This iterator returns all gateways that are connected to the System using a `FibexElementRef`.
+    pub fn gateways(&self) -> impl Iterator<Item = Gateway> + Send + use<> {
+        self.0
+            .get_sub_element(ElementName::FibexElements)
+            .into_iter()
+            .flat_map(|fibexelems| fibexelems.sub_elements())
+            .filter_map(|ferc| {
+                ferc.get_sub_element(ElementName::FibexElementRef)
+                    .and_then(|fer| fer.get_reference_target().ok())
+                    .and_then(|elem| Gateway::try_from(elem).ok())
             })
     }
 
