@@ -1,6 +1,6 @@
 use crate::communication::{
-    AbstractPhysicalChannel, CommunicationDirection, ISignal, ISignalGroup, ISignalTriggering, PduToFrameMapping,
-    PhysicalChannel, SoConIPduIdentifier, SomeipTpConnection, TransferProperty,
+    AbstractPhysicalChannel, CommunicationDirection, IPduMapping, ISignal, ISignalGroup, ISignalTriggering,
+    PduToFrameMapping, PhysicalChannel, SoConIPduIdentifier, SomeipTpConnection, TransferProperty,
 };
 use crate::{
     AbstractionElement, ArPackage, AutosarAbstractionError, ByteOrder, EcuInstance, IdentifiableAbstractionElement,
@@ -1290,6 +1290,7 @@ impl PduTriggering {
 
         AbstractionElement::remove(self, deep)?;
 
+        let mut i_pdu_mappings = Vec::new();
         for (named_parent, parent) in ref_parents {
             if named_parent.element_name() == ElementName::SoConIPduIdentifier
                 && let Ok(socon_ipdu_identifier) = SoConIPduIdentifier::try_from(named_parent)
@@ -1303,7 +1304,16 @@ impl PduTriggering {
                 && let Ok(Some(parent_parent)) = parent.parent()
             {
                 parent_parent.remove_sub_element(parent)?;
+            } else if let Some(i_pdu_mapping) = IPduMapping::from_reference_parent(&parent)
+                && !i_pdu_mappings.contains(&i_pdu_mapping)
+            {
+                // a mapping may name this triggering as both its source and its target
+                i_pdu_mappings.push(i_pdu_mapping);
             }
+        }
+
+        for i_pdu_mapping in i_pdu_mappings {
+            i_pdu_mapping.remove(deep)?;
         }
 
         if deep && let Some(pdu) = opt_pdu {
