@@ -2,7 +2,7 @@ use crate::{
     AbstractionElement, ArPackage, AutosarAbstractionError, Element, EnumItem, IdentifiableAbstractionElement,
     abstraction_element,
     datatype::{self, DataTypeMap},
-    get_reference_parents, is_used,
+    get_reference_parents, is_removed, is_used,
     software_component::{ArgumentDataPrototype, ParameterDataPrototype, VariableDataPrototype},
 };
 use autosar_data::ElementName;
@@ -264,12 +264,20 @@ impl ImplementationDataType {
         for element in self.sub_elements() {
             element.remove(deep)?;
         }
+        // a sub-element of this type that refers back to it has already removed it
+        if is_removed(self.element()) {
+            return Ok(());
+        }
 
         let ref_parents = get_reference_parents(self.element())?;
 
         AbstractionElement::remove(self, deep)?;
 
         for (named_parent, parent) in ref_parents {
+            // skip references from inside this type, which were removed together with it
+            if is_removed(&parent) {
+                continue;
+            }
             match named_parent.element_name() {
                 ElementName::ImplementationDataType => {
                     if let Ok(impl_data_type) = ImplementationDataType::try_from(named_parent) {
@@ -306,22 +314,28 @@ impl ImplementationDataType {
         }
 
         if deep {
+            // a type in the same reference cycle may already have removed a shared dependency
             if let Some(compu_method) = opt_compu_method
+                && !is_removed(compu_method.element())
                 && !is_used(compu_method.element())
             {
                 compu_method.remove(deep)?;
             }
             if let Some(data_constraint) = opt_data_constraint
+                && !is_removed(data_constraint.element())
                 && !is_used(data_constraint.element())
             {
                 data_constraint.remove(deep)?;
             }
             if let Some(base_type) = opt_base_type
+                && !is_removed(base_type.element())
                 && !is_used(base_type.element())
             {
                 base_type.remove(deep)?;
             }
+            // the referenced type is already removed if it is this type or refers back to it
             if let Some(referenced_type) = opt_referenced_type
+                && !is_removed(referenced_type.element())
                 && !is_used(referenced_type.element())
             {
                 referenced_type.remove(deep)?;
@@ -363,26 +377,35 @@ impl ImplementationDataTypeElement {
         for element in self.sub_elements() {
             element.remove(deep)?;
         }
+        // a sub-element that refers back to the type containing this element has already removed it
+        if is_removed(self.element()) {
+            return Ok(());
+        }
 
         AbstractionElement::remove(self, deep)?;
 
         if deep {
+            // a type in the same reference cycle may already have removed a shared dependency
             if let Some(compu_method) = opt_compu_method
+                && !is_removed(compu_method.element())
                 && !is_used(compu_method.element())
             {
                 compu_method.remove(deep)?;
             }
             if let Some(data_constraint) = opt_data_constraint
+                && !is_removed(data_constraint.element())
                 && !is_used(data_constraint.element())
             {
                 data_constraint.remove(deep)?;
             }
             if let Some(base_type) = opt_base_type
+                && !is_removed(base_type.element())
                 && !is_used(base_type.element())
             {
                 base_type.remove(deep)?;
             }
             if let Some(referenced_type) = opt_referenced_type
+                && !is_removed(referenced_type.element())
                 && !is_used(referenced_type.element())
             {
                 referenced_type.remove(deep)?;
@@ -703,7 +726,7 @@ mod tests {
         software_component::ArgumentDirection,
     };
     use autosar_data::AutosarVersion;
-    use datatype::{BaseTypeEncoding, CompuMethodLinearContent, CompuScaleDirection};
+    use datatype::{BaseTypeEncoding, CompuMethodContent, CompuMethodLinearContent, CompuScaleDirection};
 
     #[test]
     fn test_impl_data_type() {
@@ -935,5 +958,181 @@ mod tests {
         assert_eq!(sr_interface.data_elements().count(), 0);
         assert_eq!(cso.arguments().count(), 0);
         assert!(impl_ref_type.element().path().is_err());
+    }
+
+    #[test]
+    fn remove_self_referencing_impl_data_type() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/DataTypes").unwrap();
+        let base_type = package
+            .create_sw_base_type("uint8", 8, BaseTypeEncoding::None, None, None, None)
+            .unwrap();
+        let compu_method = package
+            .create_compu_method("CompuMethod", CompuMethodContent::Identical)
+            .unwrap();
+        let impl_type = package
+            .create_implementation_data_type(&ImplementationDataTypeSettings::Value {
+                name: "SelfRef".to_string(),
+                base_type,
+                compu_method: None,
+                data_constraint: None,
+            })
+            .unwrap();
+        impl_type
+            .apply_settings(&ImplementationDataTypeSettings::TypeReference {
+                name: "SelfRef".to_string(),
+                reftype: impl_type.clone(),
+                compu_method: Some(compu_method.clone()),
+                data_constraint: None,
+            })
+            .unwrap();
+
+        impl_type.clone().remove(true).unwrap();
+
+        assert!(impl_type.element().path().is_err());
+        assert!(compu_method.element().path().is_err());
+    }
+
+    #[test]
+    fn remove_cyclic_impl_data_types() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/DataTypes").unwrap();
+        let base_type = package
+            .create_sw_base_type("uint8", 8, BaseTypeEncoding::None, None, None, None)
+            .unwrap();
+        let compu_method = package
+            .create_compu_method("CompuMethod", CompuMethodContent::Identical)
+            .unwrap();
+        let type_a = package
+            .create_implementation_data_type(&ImplementationDataTypeSettings::Value {
+                name: "A".to_string(),
+                base_type: base_type.clone(),
+                compu_method: None,
+                data_constraint: None,
+            })
+            .unwrap();
+        let type_b = package
+            .create_implementation_data_type(&ImplementationDataTypeSettings::TypeReference {
+                name: "B".to_string(),
+                reftype: type_a.clone(),
+                compu_method: Some(compu_method.clone()),
+                data_constraint: None,
+            })
+            .unwrap();
+        type_a
+            .apply_settings(&ImplementationDataTypeSettings::TypeReference {
+                name: "A".to_string(),
+                reftype: type_b.clone(),
+                compu_method: None,
+                data_constraint: None,
+            })
+            .unwrap();
+
+        type_a.clone().remove(true).unwrap();
+
+        assert!(type_a.element().path().is_err());
+        assert!(type_b.element().path().is_err());
+        assert!(compu_method.element().path().is_err());
+    }
+
+    #[test]
+    fn remove_structure_with_self_referencing_element() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/DataTypes").unwrap();
+        let structure = package
+            .create_implementation_data_type(&ImplementationDataTypeSettings::Structure {
+                name: "Structure".to_string(),
+                elements: vec![],
+            })
+            .unwrap();
+        structure
+            .apply_settings(&ImplementationDataTypeSettings::Structure {
+                name: "Structure".to_string(),
+                elements: vec![ImplementationDataTypeSettings::TypeReference {
+                    name: "SelfElement".to_string(),
+                    reftype: structure.clone(),
+                    compu_method: None,
+                    data_constraint: None,
+                }],
+            })
+            .unwrap();
+
+        structure.clone().remove(true).unwrap();
+
+        assert!(structure.element().path().is_err());
+    }
+
+    #[test]
+    fn remove_structure_with_nested_self_referencing_element() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/DataTypes").unwrap();
+        let structure = package
+            .create_implementation_data_type(&ImplementationDataTypeSettings::Structure {
+                name: "Structure".to_string(),
+                elements: vec![],
+            })
+            .unwrap();
+        structure
+            .apply_settings(&ImplementationDataTypeSettings::Structure {
+                name: "Structure".to_string(),
+                elements: vec![ImplementationDataTypeSettings::Structure {
+                    name: "Nested".to_string(),
+                    elements: vec![ImplementationDataTypeSettings::TypeReference {
+                        name: "SelfElement".to_string(),
+                        reftype: structure.clone(),
+                        compu_method: None,
+                        data_constraint: None,
+                    }],
+                }],
+            })
+            .unwrap();
+
+        structure.clone().remove(true).unwrap();
+
+        assert!(structure.element().path().is_err());
+    }
+
+    #[test]
+    fn remove_cyclic_impl_data_types_with_shared_dependencies() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/DataTypes").unwrap();
+        let base_type = package
+            .create_sw_base_type("uint8", 8, BaseTypeEncoding::None, None, None, None)
+            .unwrap();
+        let compu_method = package
+            .create_compu_method("CompuMethod", CompuMethodContent::Identical)
+            .unwrap();
+        let data_constraint = package.create_data_constr("DataConstraint").unwrap();
+        let type_a = package
+            .create_implementation_data_type(&ImplementationDataTypeSettings::Value {
+                name: "A".to_string(),
+                base_type,
+                compu_method: None,
+                data_constraint: None,
+            })
+            .unwrap();
+        let type_b = package
+            .create_implementation_data_type(&ImplementationDataTypeSettings::TypeReference {
+                name: "B".to_string(),
+                reftype: type_a.clone(),
+                compu_method: Some(compu_method.clone()),
+                data_constraint: Some(data_constraint.clone()),
+            })
+            .unwrap();
+        type_a
+            .apply_settings(&ImplementationDataTypeSettings::TypeReference {
+                name: "A".to_string(),
+                reftype: type_b.clone(),
+                compu_method: Some(compu_method.clone()),
+                data_constraint: Some(data_constraint.clone()),
+            })
+            .unwrap();
+
+        type_a.clone().remove(true).unwrap();
+
+        assert!(type_a.element().path().is_err());
+        assert!(type_b.element().path().is_err());
+        assert!(compu_method.element().path().is_err());
+        assert!(data_constraint.element().path().is_err());
     }
 }
