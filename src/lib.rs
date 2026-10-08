@@ -490,6 +490,18 @@ pub(crate) fn is_used(element: &Element) -> bool {
     !references.is_empty()
 }
 
+/// check if the element has been removed from the model, either directly or together with one of its parents
+pub(crate) fn is_removed(element: &Element) -> bool {
+    let mut current = element.clone();
+    loop {
+        match current.parent() {
+            Ok(Some(parent)) => current = parent,
+            Ok(None) => return false,
+            Err(_) => return true,
+        }
+    }
+}
+
 //##################################################################
 
 // returns the named parent and the parent of each element that references the given element
