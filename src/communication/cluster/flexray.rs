@@ -910,7 +910,9 @@ impl FlexrayClusterSettings {
         }
 
         // cStaticSlotIDMax: 1023; cSlotIDMax: 2047
-        if self.number_of_static_slots > 1023 || self.number_of_static_slots + self.number_of_minislots > 2047 {
+        if self.number_of_static_slots > 1023
+            || u32::from(self.number_of_static_slots) + u32::from(self.number_of_minislots) > 2047
+        {
             return false;
         }
 
@@ -1178,6 +1180,15 @@ mod test {
         settings.sync_frame_id_count_max = 1;
         assert!(!settings.verify());
         // settings.sync_frame_id_count_max = settings2.sync_frame_id_count_max;
+    }
+
+    #[test]
+    fn flexray_settings_with_too_many_minislots() {
+        let settings = FlexrayClusterSettings {
+            number_of_minislots: u16::MAX,
+            ..Default::default()
+        };
+        assert!(!settings.verify());
     }
 
     #[test]
