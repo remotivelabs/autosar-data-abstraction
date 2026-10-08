@@ -207,7 +207,7 @@ impl CompositionSwComponentType {
     ) -> Result<SwComponentPrototype, AutosarAbstractionError> {
         let component_type = component_type.clone().into();
         if let SwComponentType::Composition(composition_component) = &component_type
-            && composition_component.is_parent_of(self)
+            && (composition_component == self || composition_component.is_parent_of(self))
         {
             return Err(AutosarAbstractionError::InvalidParameter(
                 "Creating a cycle in the composition hierarchy".to_string(),
@@ -896,6 +896,18 @@ mod test {
         assert!(!comp4.is_parent_of(&comp1));
         assert!(!comp4.is_parent_of(&comp2));
         assert!(!comp4.is_parent_of(&comp3));
+    }
+
+    #[test]
+    fn composition_cannot_contain_itself() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/package").unwrap();
+        let comp = CompositionSwComponentType::new("comp", &package).unwrap();
+
+        let result = comp.create_component("self", &comp);
+
+        assert!(matches!(result, Err(AutosarAbstractionError::InvalidParameter(_))));
+        assert_eq!(comp.components().count(), 0);
     }
 
     #[test]
