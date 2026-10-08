@@ -2,7 +2,7 @@ use crate::{
     AbstractionElement, ArPackage, AutosarAbstractionError, Element, IdentifiableAbstractionElement,
     abstraction_element,
     datatype::{self, DataTypeMap},
-    get_reference_parents, is_used,
+    get_reference_parents, is_removed, is_used,
     software_component::{ArgumentDataPrototype, ParameterDataPrototype, VariableDataPrototype},
 };
 use autosar_data::{ElementName, EnumItem};
@@ -35,6 +35,10 @@ impl ApplicationArrayDataType {
     pub fn remove(self, deep: bool) -> Result<(), AutosarAbstractionError> {
         if let Some(array_element) = self.array_element() {
             array_element.remove(deep)?;
+        }
+        // an array element of this type or of a type it contains has already removed it
+        if is_removed(self.element()) {
+            return Ok(());
         }
         let ref_parents = get_reference_parents(self.element())?;
 
@@ -327,6 +331,10 @@ impl ApplicationRecordDataType {
     pub fn remove(self, deep: bool) -> Result<(), AutosarAbstractionError> {
         for record_element in self.record_elements() {
             record_element.remove(deep)?;
+        }
+        // a record element of this type or of a type it contains has already removed it
+        if is_removed(self.element()) {
+            return Ok(());
         }
         let ref_parents = get_reference_parents(self.element())?;
 
@@ -1089,5 +1097,50 @@ mod tests {
         assert_eq!(sr_interface.data_elements().count(), 0);
         assert_eq!(cso.arguments().count(), 0);
         assert_eq!(record_data_type.record_elements().count(), 0);
+    }
+
+    #[test]
+    fn remove_self_typed_application_array() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/DataTypes").unwrap();
+        let primitive_type = package
+            .create_application_primitive_data_type("Primitive", ApplicationPrimitiveCategory::Value, None, None, None)
+            .unwrap();
+        let array_type = package
+            .create_application_array_data_type("Array", &primitive_type, ApplicationArraySize::Fixed(4))
+            .unwrap();
+        array_type.array_element().unwrap().set_data_type(&array_type).unwrap();
+
+        array_type.clone().remove(true).unwrap();
+
+        assert!(array_type.element().path().is_err());
+    }
+
+    #[test]
+    fn remove_self_typed_application_record() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/DataTypes").unwrap();
+        let record_type = package.create_application_record_data_type("Record").unwrap();
+        record_type.create_record_element("SelfElement", &record_type).unwrap();
+
+        record_type.clone().remove(true).unwrap();
+
+        assert!(record_type.element().path().is_err());
+    }
+
+    #[test]
+    fn remove_cyclic_application_types() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/DataTypes").unwrap();
+        let record_type = package.create_application_record_data_type("Record").unwrap();
+        let array_type = package
+            .create_application_array_data_type("Array", &record_type, ApplicationArraySize::Fixed(4))
+            .unwrap();
+        record_type.create_record_element("ArrayElement", &array_type).unwrap();
+
+        array_type.clone().remove(true).unwrap();
+
+        assert!(array_type.element().path().is_err());
+        assert!(record_type.element().path().is_err());
     }
 }
