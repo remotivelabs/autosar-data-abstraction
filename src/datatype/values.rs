@@ -25,11 +25,7 @@ impl ConstantSpecification {
     ) -> Result<ConstantSpecification, AutosarAbstractionError> {
         let elements = package.element().get_or_create_sub_element(ElementName::Elements)?;
 
-        let const_spec_elem = elements
-            .create_named_sub_element(ElementName::ConstantSpecification, name)
-            .unwrap();
-        let const_spec = Self(const_spec_elem);
-        // let const_spec = Self(elements.create_named_sub_element(ElementName::ConstantSpecification, name)?);
+        let const_spec = Self(elements.create_named_sub_element(ElementName::ConstantSpecification, name)?);
         const_spec.set_value_specification(value)?;
 
         Ok(const_spec)
@@ -1371,6 +1367,23 @@ mod test {
         software_component::{ArgumentDirection, ClientServerInterface},
     };
     use autosar_data::AutosarVersion;
+
+    #[test]
+    fn duplicate_constant_specification() {
+        let model = AutosarModelAbstraction::create("filename", AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/Pkg").unwrap();
+        let value = NumericalValueSpecification {
+            label: None,
+            value: 1.0,
+        };
+        package
+            .create_constant_specification("Constant", value.clone())
+            .unwrap();
+
+        let result = package.create_constant_specification("Constant", value);
+
+        assert!(result.is_err());
+    }
 
     #[test]
     fn constant_specification() {
