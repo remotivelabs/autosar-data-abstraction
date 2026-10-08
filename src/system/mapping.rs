@@ -66,19 +66,31 @@ impl SystemMapping {
         }
 
         // find all compositions between the root composition and the current composition
+        let mut visited_compositions = vec![current_composition.clone()];
         while current_composition != root_composition_type {
-            // typical case is that each component is only in one composition, so the for loop should only run once
-            for comp_proto in current_composition.instances() {
-                // this condition should never fail - it only returns none if comp_proto is the root
-                // composition, which we already know is not true
-                if let Ok(Some(comp_type)) = comp_proto.parent_composition()
-                    && (root_composition_type == comp_type || root_composition_type.is_parent_of(&comp_type))
-                {
-                    context_composition_prototypes.push(comp_proto.clone());
-                    current_composition = comp_type;
-                    break;
-                }
+            // typical case is that each component is only in one composition, so this should find the first instance
+            let (comp_proto, comp_type) = current_composition
+                .instances()
+                .into_iter()
+                .find_map(|comp_proto| match comp_proto.parent_composition() {
+                    Ok(Some(comp_type))
+                        if root_composition_type == comp_type || root_composition_type.is_parent_of(&comp_type) =>
+                    {
+                        Some((comp_proto, comp_type))
+                    }
+                    _ => None,
+                })
+                .ok_or(AutosarAbstractionError::InvalidParameter(
+                    "The composition has no instance inside the root composition".to_string(),
+                ))?;
+            if visited_compositions.contains(&comp_type) {
+                return Err(AutosarAbstractionError::InvalidParameter(
+                    "The composition hierarchy contains a cycle".to_string(),
+                ));
             }
+            visited_compositions.push(comp_type.clone());
+            context_composition_prototypes.push(comp_proto);
+            current_composition = comp_type;
         }
 
         // the items were collected in reverse order, so we need to reverse them again
@@ -558,5 +570,39 @@ mod test {
         assert_eq!(trigger_to_signal.trigger(), Some(trigger));
         assert_eq!(trigger_to_signal.system_signal(), Some(trigger_signal.clone()));
         assert!(package.create_system_signal("unmapped").unwrap().mappings().is_empty());
+    }
+
+    #[test]
+    fn map_swc_to_ecu_in_cyclic_composition() {
+        let model = AutosarModelAbstraction::create("filename", autosar_data::AutosarVersion::LATEST);
+        let package = model.get_or_create_package("/package").unwrap();
+        let system = package
+            .create_system("test_system", SystemCategory::EcuExtract)
+            .unwrap();
+        let mapping = system.get_or_create_mapping("test_mapping").unwrap();
+        let ecu = system.create_ecu_instance("test_ecu", &package).unwrap();
+
+        // composition C contains an instance of itself, as a loaded file can; create_component refuses this
+        let cyclic = package.create_composition_sw_component_type("Cyclic").unwrap();
+        let self_prototype = cyclic
+            .element()
+            .get_or_create_sub_element(ElementName::Components)
+            .unwrap()
+            .create_named_sub_element(ElementName::SwComponentPrototype, "self")
+            .unwrap();
+        self_prototype
+            .create_sub_element(ElementName::TypeTref)
+            .unwrap()
+            .set_reference_target(cyclic.element())
+            .unwrap();
+        let app_type = package.create_application_sw_component_type("App").unwrap();
+        let app_prototype = cyclic.create_component("app", &app_type).unwrap();
+
+        let root_composition_type = package.create_composition_sw_component_type("Root").unwrap();
+        root_composition_type.create_component("cyclic", &cyclic).unwrap();
+        system.set_root_sw_composition("root", &root_composition_type).unwrap();
+
+        let result = mapping.map_swc_to_ecu("app_to_ecu", &app_prototype, &ecu);
+        assert!(matches!(result, Err(AutosarAbstractionError::InvalidParameter(_))));
     }
 }
