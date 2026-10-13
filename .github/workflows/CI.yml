@@ -17,13 +17,6 @@ jobs:
     steps:
     - uses: actions/checkout@v6
 
-    # The runner comes with rustup and a recent stable toolchain.
-    - name: Set up the Rust toolchain
-      run: |
-        rustup update stable
-        rustup default stable
-        rustup component add clippy rustfmt
-
     - name: Cache
       uses: actions/cache@v4
       with:
