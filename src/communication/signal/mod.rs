@@ -5,7 +5,8 @@ use crate::communication::{
 use crate::datatype::{CompuMethod, DataConstr, SwBaseType, Unit, ValueSpecification};
 use crate::{
     AbstractionElement, ArPackage, AutosarAbstractionError, EcuInstance, abstraction_element,
-    communication::ISignalToIPduMapping, make_unique_name,
+    communication::{ISignalMapping, ISignalToIPduMapping},
+    make_unique_name,
 };
 use crate::{
     IdentifiableAbstractionElement, SenderReceiverToSignalMapping, SignalMapping, get_reference_parents, is_used,
@@ -773,14 +774,33 @@ impl ISignalTriggering {
         Ok(pt)
     }
 
-    /// remove this `ISignalTriggering` from the model
+    /// remove this `ISignalTriggering` from the model, the references to it in PDU triggerings, and the gateway
+    /// mappings that name it
     pub fn remove(self, deep: bool) -> Result<(), AutosarAbstractionError> {
         let opt_signal = self.signal();
         for sp in self.signal_ports() {
             sp.remove(deep)?;
         }
+        let ref_parents = get_reference_parents(self.element())?;
 
         AbstractionElement::remove(self, deep)?;
+
+        let mut mappings = Vec::new();
+        for (_, parent) in ref_parents {
+            if parent.element_name() == ElementName::ISignalTriggeringRefConditional
+                && let Ok(Some(parent_parent)) = parent.parent()
+            {
+                parent_parent.remove_sub_element(parent)?;
+            } else if let Some(mapping) = ISignalMapping::from_reference_parent(&parent)
+                && !mappings.contains(&mapping)
+            {
+                // a mapping may name this triggering as both its source and its target
+                mappings.push(mapping);
+            }
+        }
+        for mapping in mappings {
+            mapping.remove(deep)?;
+        }
 
         if deep
             && let Some(signal) = opt_signal
